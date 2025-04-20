@@ -1,10 +1,10 @@
 from flask import Flask, jsonify, request
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from docx import Document
 import os
+import json
+from google.auth.transport.requests import Request
 
 app = Flask(__name__)
 
@@ -13,68 +13,50 @@ SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 creds = None
 drive_service = None
 
-# 🔐 Set your root logs folder ID here (the only hardcoded part)
+# 🔐 Set your root logs folder ID here
 root_folder_id = "1AUi1RxwYNW_jqJmaIWbONshfU_RmRp3l"
 
-# 🔐 Authenticate once
-import json
-
+# 🔐 Authenticate using env vars
 def authenticate():
     global creds, drive_service
+    print("🔐 Starting authentication...")
 
     creds_json = os.environ.get("GOOGLE_TOKEN")
     credentials_json = os.environ.get("GOOGLE_CREDENTIALS")
 
     if creds_json and credentials_json:
-        creds_data = json.loads(creds_json)
-        credentials_data = json.loads(credentials_json)
-        creds = Credentials.from_authorized_user_info(creds_data, SCOPES)
-        drive_service = build('drive', 'v3', credentials=creds)
+        try:
+            creds_data = json.loads(creds_json)
+            credentials_data = json.loads(credentials_json)
+
+            creds = Credentials.from_authorized_user_info(creds_data, SCOPES)
+
+            # Optional: refresh if expired
+            if creds and creds.expired and creds.refresh_token:
+                print("🔁 Refreshing expired token...")
+                creds.refresh(Request())
+
+            drive_service = build('drive', 'v3', credentials=creds)
+            print("✅ Google Drive service initialized.")
+        except Exception as e:
+            print("❌ Failed to parse credentials or initialize service.")
+            raise e
     else:
-        raise Exception("Missing GOOGLE_TOKEN or GOOGLE_CREDENTIALS env variables.")
+        raise ValueError("Missing GOOGLE_TOKEN or GOOGLE_CREDENTIALS")
 
-
-    if os.path.exists('token.json'):
-        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-    else:
-        print("⚠️ token.json not found, starting OAuth flow...")
-        flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-        creds = flow.run_console()
-        with open('token.json', 'w') as token:
-            token.write(creds.to_json())
-
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            print("🔁 Refreshing expired token...")
-            creds.refresh(Request())
-            with open('token.json', 'w') as token:
-                token.write(creds.to_json())
-        else:
-            raise ValueError("❌ Invalid or missing credentials.")
-
-    drive_service = build('drive', 'v3', credentials=creds)
-@app.route('/ping')
-def ping():
-    print("🔔 Ping route hit")
-    return 'pong'
-
-# 🌐 Root test route
+# 🌐 Root test
 @app.route('/')
 def index():
     return 'Drive Log API is running!'
 
-# 📁 List all subfolders in root (no filters)
+# 📁 List subfolders
 @app.route('/list-folders', methods=['GET'])
 def list_all_subfolders():
     print("🔥 /list-folders route hit")
     try:
         global root_folder_id
         authenticate()
-
-        print(f"🔐 creds valid: {creds.valid}, expired: {creds.expired}")
-
-        if not root_folder_id:
-            return jsonify({'error': 'Root folder not set.'}), 400
+        print("✅ Authenticated successfully!")
 
         query = f"'{root_folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed = false"
         results = drive_service.files().list(
@@ -84,14 +66,16 @@ def list_all_subfolders():
         ).execute()
 
         folders = results.get('files', [])
+        print(f"📁 Found {len(folders)} folders.")
         return jsonify(folders)
 
     except Exception as e:
         import traceback
         traceback.print_exc()
+        print("❌ Exception in /list-folders:", str(e))
         return jsonify({'error': str(e)}), 500
 
-# 📄 List all .docx files inside a folder
+# 📄 List .docx files
 @app.route('/list-files', methods=['GET'])
 def list_files_in_folder():
     authenticate()
@@ -107,7 +91,7 @@ def list_files_in_folder():
     ).execute()
     return jsonify(results.get('files', []))
 
-# 🧠 Parse a DOCX file into structured task format
+# 🧠 Parse DOCX file
 @app.route('/parse-docx', methods=['GET'])
 def parse_docx_file():
     authenticate()
@@ -141,7 +125,7 @@ def parse_docx_file():
 
     return jsonify(structured_logs)
 
-# ▶️ Run the server using Replit's PORT
+# ▶️ Launch app on dynamic Render port
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=True)
+    app.run(host="0.0.0.0", port=port)
