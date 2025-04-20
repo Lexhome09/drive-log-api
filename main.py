@@ -1,25 +1,21 @@
 from flask import Flask, jsonify, request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from google.auth.transport.requests import Request
 from docx import Document
 import os
 import json
-from google.auth.transport.requests import Request
 
 app = Flask(__name__)
 
-# Google API Scopes and Globals
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 creds = None
 drive_service = None
-
-# 🔐 Set your root logs folder ID here
 root_folder_id = "1AUi1RxwYNW_jqJmaIWbONshfU_RmRp3l"
 
-# 🔐 Authenticate using env vars
 def authenticate():
     global creds, drive_service
-    print("🔐 Starting authentication...")
+    print("🔐 Authenticating...")
 
     creds_json = os.environ.get("GOOGLE_TOKEN")
     credentials_json = os.environ.get("GOOGLE_CREDENTIALS")
@@ -27,37 +23,29 @@ def authenticate():
     if creds_json and credentials_json:
         try:
             creds_data = json.loads(creds_json)
-            credentials_data = json.loads(credentials_json)
-
             creds = Credentials.from_authorized_user_info(creds_data, SCOPES)
 
-            # Optional: refresh if expired
             if creds and creds.expired and creds.refresh_token:
-                print("🔁 Refreshing expired token...")
+                print("🔁 Refreshing token...")
                 creds.refresh(Request())
 
             drive_service = build('drive', 'v3', credentials=creds)
             print("✅ Google Drive service initialized.")
         except Exception as e:
-            print("❌ Failed to parse credentials or initialize service.")
+            print("❌ Error during authentication:", str(e))
             raise e
     else:
         raise ValueError("Missing GOOGLE_TOKEN or GOOGLE_CREDENTIALS")
 
-# 🌐 Root test
 @app.route('/')
 def index():
     return 'Drive Log API is running!'
 
-# 📁 List subfolders
 @app.route('/list-folders', methods=['GET'])
 def list_all_subfolders():
     print("🔥 /list-folders route hit")
     try:
-        global root_folder_id
         authenticate()
-        print("✅ Authenticated successfully!")
-
         query = f"'{root_folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed = false"
         results = drive_service.files().list(
             q=query,
@@ -66,16 +54,13 @@ def list_all_subfolders():
         ).execute()
 
         folders = results.get('files', [])
-        print(f"📁 Found {len(folders)} folders.")
         return jsonify(folders)
-
     except Exception as e:
         import traceback
         traceback.print_exc()
-        print("❌ Exception in /list-folders:", str(e))
+        print("❌ Exception:", str(e))
         return jsonify({'error': str(e)}), 500
 
-# 📄 List .docx files
 @app.route('/list-files', methods=['GET'])
 def list_files_in_folder():
     authenticate()
@@ -91,7 +76,6 @@ def list_files_in_folder():
     ).execute()
     return jsonify(results.get('files', []))
 
-# 🧠 Parse DOCX file
 @app.route('/parse-docx', methods=['GET'])
 def parse_docx_file():
     authenticate()
@@ -125,7 +109,35 @@ def parse_docx_file():
 
     return jsonify(structured_logs)
 
-# ▶️ Launch app on dynamic Render port
+# ✅ Test if env variables exist
+@app.route('/test-env')
+def test_env():
+    creds = os.environ.get("GOOGLE_CREDENTIALS")
+    token = os.environ.get("GOOGLE_TOKEN")
+    return {
+        "has_credentials": bool(creds),
+        "has_token": bool(token),
+        "creds_snippet": creds[:40] if creds else None,
+        "token_snippet": token[:40] if token else None
+    }
+
+# ✅ Debug Google token health
+@app.route('/debug-token')
+def debug_token():
+    global creds
+    try:
+        authenticate()
+        return {
+            "valid": creds.valid,
+            "expired": creds.expired,
+            "has_refresh_token": bool(creds.refresh_token),
+            "scopes": creds.scopes
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+# ▶️ Launch
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
