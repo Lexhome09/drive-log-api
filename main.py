@@ -17,9 +17,22 @@ drive_service = None
 root_folder_id = "1AUi1RxwYNW_jqJmaIWbONshfU_RmRp3l"
 
 # 🔐 Authenticate once
+import json
+
 def authenticate():
     global creds, drive_service
-    print("🔐 Authenticating with Google...")
+
+    creds_json = os.environ.get("GOOGLE_TOKEN")
+    credentials_json = os.environ.get("GOOGLE_CREDENTIALS")
+
+    if creds_json and credentials_json:
+        creds_data = json.loads(creds_json)
+        credentials_data = json.loads(credentials_json)
+        creds = Credentials.from_authorized_user_info(creds_data, SCOPES)
+        drive_service = build('drive', 'v3', credentials=creds)
+    else:
+        raise Exception("Missing GOOGLE_TOKEN or GOOGLE_CREDENTIALS env variables.")
+
 
     if os.path.exists('token.json'):
         creds = Credentials.from_authorized_user_file('token.json', SCOPES)
